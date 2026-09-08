@@ -811,17 +811,22 @@ public sealed class EffectEngine : IDisposable
         var minY = rawPoints.Min(p => p.Y);
         var maxY = rawPoints.Max(p => p.Y);
 
-        var hasBoundingBox = boxWidth > 0 && boxHeight > 0;
-        var width = hasBoundingBox ? boxWidth : Math.Max(maxX - minX, 0.001d);
-        var height = hasBoundingBox ? boxHeight : Math.Max(maxY - minY, 0.001d);
-        var originX = minX;
-        var originY = minY;
+        var spanX = maxX - minX;
+        var spanY = maxY - minY;
+        var width = spanX > 0.0001d ? spanX : (boxWidth > 0 ? boxWidth : 0.001d);
+        var height = spanY > 0.0001d ? spanY : (boxHeight > 0 ? boxHeight : 0.001d);
+        var originX = spanX > 0.0001d ? minX : (boxWidth > 0 ? 0d : minX);
+        var originY = spanY > 0.0001d ? minY : (boxHeight > 0 ? 0d : minY);
 
         return rawPoints
             .Select(p =>
             {
-                var normalizedX = Math.Clamp((p.X - originX) / width, 0d, 1d);
-                var normalizedY = Math.Clamp((p.Y - originY) / height, 0d, 1d);
+                var normalizedX = spanX > 0.0001d
+                    ? Math.Clamp((p.X - originX) / width, 0d, 1d)
+                    : (boxWidth > 0 ? Math.Clamp(p.X / boxWidth, 0d, 1d) : 0.5d);
+                var normalizedY = spanY > 0.0001d
+                    ? Math.Clamp((p.Y - originY) / height, 0d, 1d)
+                    : (boxHeight > 0 ? Math.Clamp(p.Y / boxHeight, 0d, 1d) : 0.5d);
                 var dx = normalizedX - 0.5;
                 var dy = normalizedY - 0.5;
                 var distance = Math.Clamp(Math.Sqrt((dx * dx) + (dy * dy)) / 0.7071067811865476, 0d, 1d);
@@ -840,7 +845,8 @@ public sealed class EffectEngine : IDisposable
             <= 61 => [14, 14, 14, 13, 6],
             <= 75 => [15, 15, 15, 14, 13, 3],
             <= 87 => [15, 15, 15, 14, 13, 8, 7],
-            _ =>     [16, 16, 15, 15, 14, 13, 8],
+            <= 108 => [21, 21, 21, 21, 20, 4],
+            _ =>     [20, 20, 20, 20, 20, 20],
         };
 
         var rows = new List<int>();
@@ -897,28 +903,42 @@ public sealed class EffectEngine : IDisposable
 
     private static double ToMeters(double value)
     {
-        if (value <= 0)
+        if (double.IsNaN(value) || double.IsInfinity(value) || value == 0)
         {
             return 0;
         }
 
-        return value > 10.0 ? value / 1_000_000.0 : value;
+        return Math.Abs(value) > 10.0 ? value / 1_000_000.0 : value;
     }
 
     private static double ReadX(LampInfo lampInfo)
     {
-        return ReadNumericProperty(lampInfo, "PositionXInMicrometers")
-            ?? ReadNumericProperty(lampInfo, "PositionX")
-            ?? ReadVectorProperty(lampInfo, "X")
-            ?? 0d;
+        try
+        {
+            return lampInfo.Position.X;
+        }
+        catch
+        {
+            return ReadNumericProperty(lampInfo, "PositionXInMicrometers")
+                ?? ReadNumericProperty(lampInfo, "PositionX")
+                ?? ReadVectorProperty(lampInfo, "X")
+                ?? 0d;
+        }
     }
 
     private static double ReadY(LampInfo lampInfo)
     {
-        return ReadNumericProperty(lampInfo, "PositionYInMicrometers")
-            ?? ReadNumericProperty(lampInfo, "PositionY")
-            ?? ReadVectorProperty(lampInfo, "Y")
-            ?? 0d;
+        try
+        {
+            return lampInfo.Position.Y;
+        }
+        catch
+        {
+            return ReadNumericProperty(lampInfo, "PositionYInMicrometers")
+                ?? ReadNumericProperty(lampInfo, "PositionY")
+                ?? ReadVectorProperty(lampInfo, "Y")
+                ?? 0d;
+        }
     }
 
     private static double? ReadNumericProperty(LampInfo lampInfo, string propertyName)
@@ -935,8 +955,14 @@ public sealed class EffectEngine : IDisposable
             return null;
         }
 
-        var value = position.GetType().GetProperty(axis)?.GetValue(position);
-        return value is null ? null : Convert.ToDouble(value);
+        if (position is System.Numerics.Vector3 v)
+        {
+            return axis.Equals("X", StringComparison.OrdinalIgnoreCase) ? v.X : v.Y;
+        }
+
+        var member = position.GetType().GetProperty(axis)?.GetValue(position)
+            ?? position.GetType().GetField(axis)?.GetValue(position);
+        return member is null ? null : Convert.ToDouble(member);
     }
 
     private static Color Blend(Color from, Color to, double amount)

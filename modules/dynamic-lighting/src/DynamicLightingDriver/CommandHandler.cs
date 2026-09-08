@@ -237,13 +237,19 @@ public sealed class CommandHandler
             var maxX = metersX.Length > 0 ? metersX.Max() : 0d;
             var minY = metersY.Length > 0 ? metersY.Min() : 0d;
             var maxY = metersY.Length > 0 ? metersY.Max() : 0d;
-            var width = boxWidth > 0 ? boxWidth : Math.Max(maxX - minX, 0.001);
-            var height = boxHeight > 0 ? boxHeight : Math.Max(maxY - minY, 0.001);
+            var spanX = maxX - minX;
+            var spanY = maxY - minY;
+            var width = spanX > 0.0001 ? spanX : (boxWidth > 0 ? boxWidth : 0.001);
+            var height = spanY > 0.0001 ? spanY : (boxHeight > 0 ? boxHeight : 0.001);
 
             for (var i = 0; i < lampCount; i++)
             {
-                var nx = Math.Round(Math.Clamp((metersX[i] - minX) / width, 0d, 1d), 3);
-                var ny = Math.Round(Math.Clamp((metersY[i] - minY) / height, 0d, 1d), 3);
+                var nx = spanX > 0.0001
+                    ? Math.Round(Math.Clamp((metersX[i] - minX) / width, 0d, 1d), 3)
+                    : (boxWidth > 0 ? Math.Round(Math.Clamp(metersX[i] / boxWidth, 0d, 1d), 3) : 0.5);
+                var ny = spanY > 0.0001
+                    ? Math.Round(Math.Clamp((metersY[i] - minY) / height, 0d, 1d), 3)
+                    : (boxHeight > 0 ? Math.Round(Math.Clamp(metersY[i] / boxHeight, 0d, 1d), 3) : 0.5);
                 var lampInfo = device.GetLampInfo(i);
                 lamps.Add(new
                 {
@@ -326,13 +332,19 @@ public sealed class CommandHandler
                 var maxX = metersX.Length > 0 ? metersX.Max() : 0d;
                 var minY = metersY.Length > 0 ? metersY.Min() : 0d;
                 var maxY = metersY.Length > 0 ? metersY.Max() : 0d;
-                var width = boxWidth > 0 ? boxWidth : Math.Max(maxX - minX, 0.001);
-                var height = boxHeight > 0 ? boxHeight : Math.Max(maxY - minY, 0.001);
+                var spanX = maxX - minX;
+                var spanY = maxY - minY;
+                var width = spanX > 0.0001 ? spanX : (boxWidth > 0 ? boxWidth : 0.001);
+                var height = spanY > 0.0001 ? spanY : (boxHeight > 0 ? boxHeight : 0.001);
 
                 for (var i = 0; i < lampArray.LampCount; i++)
                 {
-                    var nx = Math.Round(Math.Clamp((metersX[i] - minX) / width, 0d, 1d), 3);
-                    var ny = Math.Round(Math.Clamp((metersY[i] - minY) / height, 0d, 1d), 3);
+                    var nx = spanX > 0.0001
+                        ? Math.Round(Math.Clamp((metersX[i] - minX) / width, 0d, 1d), 3)
+                        : (boxWidth > 0 ? Math.Round(Math.Clamp(metersX[i] / boxWidth, 0d, 1d), 3) : 0.5);
+                    var ny = spanY > 0.0001
+                        ? Math.Round(Math.Clamp((metersY[i] - minY) / height, 0d, 1d), 3)
+                        : (boxHeight > 0 ? Math.Round(Math.Clamp(metersY[i] / boxHeight, 0d, 1d), 3) : 0.5);
                     var lampInfo = lampArray.GetLampInfo(i);
                     lamps.Add(new
                     {
@@ -472,12 +484,13 @@ public sealed class CommandHandler
             return "OK " + sb.ToString().Replace("\r\n", "\\n").Replace("\n", "\\n");
         }
 
-        var targetId = devices[0].Id;
+        var targetDevice = devices.FirstOrDefault(d => d.IsKeyboard) ?? devices[0];
+        var targetId = targetDevice.Id;
         LampArray lampArray;
         try
         {
             lampArray = await LampArray.FromIdAsync(targetId);
-            sb.AppendLine($"  OK: {lampArray.LampCount} lamps, IsEnabled={lampArray.IsEnabled}");
+            sb.AppendLine($"  OK: {lampArray.LampCount} lamps on {targetDevice.Name} ({targetDevice.LampArrayKind}), IsEnabled={lampArray.IsEnabled}");
             sb.AppendLine($"  IsAvailable (ambient): {lampArray.IsAvailable}");
         }
         catch (Exception ex)
@@ -731,9 +744,9 @@ public sealed class CommandHandler
         if (devices.Count == 0)
             return null;
 
-        var first = devices[0];
-        var lampArray = await _lampArrayService.GetDeviceAsync(first.Id);
-        return (first.Id, lampArray);
+        var target = devices.FirstOrDefault(d => d.IsKeyboard) ?? devices[0];
+        var lampArray = await _lampArrayService.GetDeviceAsync(target.Id);
+        return (target.Id, lampArray);
     }
 
     private async Task EnsureDeviceAvailable(LampArray device)
@@ -811,8 +824,8 @@ public sealed class CommandHandler
 
     private static double LampMeters(double value)
     {
-        if (value <= 0) return 0;
-        return value > 10.0 ? value / 1_000_000.0 : value;
+        if (double.IsNaN(value) || double.IsInfinity(value) || value == 0) return 0;
+        return Math.Abs(value) > 10.0 ? value / 1_000_000.0 : value;
     }
 
     private static string LampPurpose(LampInfo lampInfo)
@@ -834,7 +847,8 @@ public sealed class CommandHandler
             <= 61 => [14, 14, 14, 13, 6],
             <= 75 => [15, 15, 15, 14, 13, 3],
             <= 87 => [15, 15, 15, 14, 13, 8, 7],
-            _ =>     [16, 16, 15, 15, 14, 13, 8],
+            <= 108 => [21, 21, 21, 21, 20, 4],
+            _ =>     [20, 20, 20, 20, 20, 20],
         };
 
         var totalAssigned = 0;

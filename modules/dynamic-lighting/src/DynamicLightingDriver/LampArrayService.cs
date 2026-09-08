@@ -238,31 +238,39 @@ public sealed class LampArrayService : IDisposable
 
     private static double ToMeters(double value)
     {
-        if (value <= 0)
+        if (double.IsNaN(value) || double.IsInfinity(value) || value == 0)
         {
             return 0;
         }
 
-        return value > 10.0 ? value / 1_000_000.0 : value;
+        return Math.Abs(value) > 10.0 ? value / 1_000_000.0 : value;
     }
 
     private static LampPosition ReadLampPosition(int index, LampInfo lampInfo)
     {
-        var x = ReadNumericProperty(lampInfo, "PositionXInMicrometers")
-            ?? ReadNumericProperty(lampInfo, "PositionX")
-            ?? 0d;
-
-        var y = ReadNumericProperty(lampInfo, "PositionYInMicrometers")
-            ?? ReadNumericProperty(lampInfo, "PositionY")
-            ?? 0d;
-
-        if ((x == 0d && y == 0d) && TryReadVectorPosition(lampInfo, out var vectorX, out var vectorY))
+        try
         {
-            x = vectorX;
-            y = vectorY;
+            var pos = lampInfo.Position;
+            return new LampPosition(index, pos.X, pos.Y);
         }
+        catch
+        {
+            var x = ReadNumericProperty(lampInfo, "PositionXInMicrometers")
+                ?? ReadNumericProperty(lampInfo, "PositionX")
+                ?? 0d;
 
-        return new LampPosition(index, x, y);
+            var y = ReadNumericProperty(lampInfo, "PositionYInMicrometers")
+                ?? ReadNumericProperty(lampInfo, "PositionY")
+                ?? 0d;
+
+            if ((x == 0d && y == 0d) && TryReadVectorPosition(lampInfo, out var vectorX, out var vectorY))
+            {
+                x = vectorX;
+                y = vectorY;
+            }
+
+            return new LampPosition(index, x, y);
+        }
     }
 
     private static bool TryReadVectorPosition(LampInfo lampInfo, out double x, out double y)
@@ -276,8 +284,17 @@ public sealed class LampArrayService : IDisposable
             return false;
         }
 
-        var xValue = position.GetType().GetProperty("X")?.GetValue(position);
-        var yValue = position.GetType().GetProperty("Y")?.GetValue(position);
+        if (position is System.Numerics.Vector3 v)
+        {
+            x = v.X;
+            y = v.Y;
+            return true;
+        }
+
+        var xValue = position.GetType().GetProperty("X")?.GetValue(position)
+            ?? position.GetType().GetField("X")?.GetValue(position);
+        var yValue = position.GetType().GetProperty("Y")?.GetValue(position)
+            ?? position.GetType().GetField("Y")?.GetValue(position);
 
         if (xValue is null || yValue is null)
         {
